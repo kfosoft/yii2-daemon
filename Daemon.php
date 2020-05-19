@@ -1,51 +1,56 @@
 <?php
 
-namespace vyants\daemon;
+namespace kfosoft\daemon;
 
+use Yii;
+use yii\base\Action;
+use yii\base\ExitException;
 use yii\base\NotSupportedException;
 use yii\console\Controller;
+use yii\console\ExitCode;
+use yii\db\Exception as DbException;
 use yii\helpers\Console;
+use yii\log\FileTarget;
 
 /**
- * Class DaemonController
- *
- * @author Vladimir Yants <vladimir.yants@gmail.com>
+ * @package kfosoft\daemon
+ * @version 20.05
+ * @author (c) KFOSOFT <kfosoftware@gmail.com>
  */
-abstract class DaemonController extends Controller
+abstract class Daemon extends Controller
 {
+    protected const EVENT_BEFORE_JOB = 'EVENT_BEFORE_JOB';
+    protected const EVENT_AFTER_JOB = 'EVENT_AFTER_JOB';
 
-    const EVENT_BEFORE_JOB = "EVENT_BEFORE_JOB";
-    const EVENT_AFTER_JOB = "EVENT_AFTER_JOB";
-
-    const EVENT_BEFORE_ITERATION = "event_before_iteration";
-    const EVENT_AFTER_ITERATION = "event_after_iteration";
+    protected const EVENT_BEFORE_ITERATION = 'event_before_iteration';
+    protected const EVENT_AFTER_ITERATION = 'event_after_iteration';
 
     /**
-     * @var $demonize boolean Run controller as Daemon
+     * @var bool Run controller as Daemon
      * @default false
      */
     public $demonize = false;
 
     /**
-     * @var $isMultiInstance boolean allow daemon create a few instances
+     * @var bool allow daemon create a few instances
      * @see $maxChildProcesses
      * @default false
      */
     public $isMultiInstance = false;
 
     /**
-     * @var $parentPID int main procces pid
+     * @var int main procces pid
      */
     protected $parentPID;
 
     /**
-     * @var $maxChildProcesses int max daemon instances
+     * @var int max daemon instances
      * @default 10
      */
     public $maxChildProcesses = 10;
 
     /**
-     * @var $currentJobs [] array of running instances
+     * @var array array of running instances
      */
     protected static $currentJobs = [];
 
@@ -56,7 +61,7 @@ abstract class DaemonController extends Controller
     protected $memoryLimit = 268435456;
 
     /**
-     * @var boolean used for soft daemon stop, set 1 to stop
+     * @var bool used for soft daemon stop, set 1 to stop
      */
     private static $stopFlag = false;
 
@@ -66,30 +71,47 @@ abstract class DaemonController extends Controller
      */
     protected $sleep = 5;
 
-    protected $pidDir = "@runtime/daemons/pids";
+    /**
+     * @var string
+     */
+    protected $pidDir = '@runtime/daemons/pids';
 
-    protected $logDir = "@runtime/daemons/logs";
+    /**
+     * @var string
+     */
+    protected $logDir = '@runtime/daemons/logs';
 
+    /**
+     * @var resource|null
+     */
     private $stdIn;
+
+    /**
+     * @var resource|null
+     */
     private $stdOut;
+
+    /**
+     * @var resource|null
+     */
     private $stdErr;
 
     /**
-     * Init function
+     * {@inheritdoc}
      */
-    public function init()
+    public function init(): void
     {
         parent::init();
 
         //set PCNTL signal handlers
-        pcntl_signal(SIGTERM, ['vyants\daemon\DaemonController', 'signalHandler']);
-        pcntl_signal(SIGINT, ['vyants\daemon\DaemonController', 'signalHandler']);
-        pcntl_signal(SIGHUP, ['vyants\daemon\DaemonController', 'signalHandler']);
-        pcntl_signal(SIGUSR1, ['vyants\daemon\DaemonController', 'signalHandler']);
-        pcntl_signal(SIGCHLD, ['vyants\daemon\DaemonController', 'signalHandler']);
+        pcntl_signal(SIGTERM, [self::class, 'signalHandler']);
+        pcntl_signal(SIGINT, [self::class, 'signalHandler']);
+        pcntl_signal(SIGHUP, [self::class, 'signalHandler']);
+        pcntl_signal(SIGUSR1, [self::class, 'signalHandler']);
+        pcntl_signal(SIGCHLD, [self::class, 'signalHandler']);
     }
 
-    function __destruct()
+    public function __destruct()
     {
         $this->deletePid();
     }
@@ -97,48 +119,53 @@ abstract class DaemonController extends Controller
     /**
      * Adjusting logger. You can override it.
      */
-    protected function initLogger()
+    protected function initLogger(): void
     {
-        $targets = \Yii::$app->getLog()->targets;
+        $targets = Yii::$app->getLog()->targets;
+
         foreach ($targets as $name => $target) {
             $target->enabled = false;
         }
+
         $config = [
             'levels' => ['error', 'warning', 'trace', 'info'],
-            'logFile' => \Yii::getAlias($this->logDir) . DIRECTORY_SEPARATOR . $this->getProcessName() . '.log',
+            'logFile' => sprintf('%s%s%s.log', Yii::getAlias($this->logDir), DIRECTORY_SEPARATOR, $this->getProcessName()),
             'logVars' => [],
             'except' => [
                 'yii\db\*', // Don't include messages from db
             ],
         ];
-        $targets['daemon'] = new \yii\log\FileTarget($config);
-        \Yii::$app->getLog()->targets = $targets;
-        \Yii::$app->getLog()->init();
+
+        $targets['daemon'] = new FileTarget($config);
+        Yii::$app->getLog()->targets = $targets;
+        Yii::$app->getLog()->init();
     }
 
     /**
      * Daemon worker body
      *
-     * @param $job
+     * @param array $job
      *
-     * @return boolean
+     * @return bool
      */
-    abstract protected function doJob($job);
+    abstract protected function doJob(array $job): bool;
 
     /**
      * Base action, you can\t override or create another actions
-     * @return bool
-     * @throws NotSupportedException
+     * @return int
+     *
+     * @throws DbException
+     * @throws ExitException
      */
-    final public function actionIndex()
+    final public function actionIndex(): ?int
     {
         if ($this->demonize) {
             $pid = pcntl_fork();
             if ($pid == -1) {
-                $this->halt(self::EXIT_CODE_ERROR, 'pcntl_fork() rise error');
+                $this->halt(ExitCode::UNSPECIFIED_ERROR, 'pcntl_fork() rise error');
             } elseif ($pid) {
                 $this->cleanLog();
-                $this->halt(self::EXIT_CODE_NORMAL);
+                $this->halt(ExitCode::OK);
             } else {
                 posix_setsid();
                 $this->closeStdStreams();
@@ -153,18 +180,9 @@ abstract class DaemonController extends Controller
     /**
      * Set new process name
      */
-    protected function changeProcessName()
+    protected function changeProcessName(): void
     {
-        //rename process
-        if (version_compare(PHP_VERSION, '5.5.0') >= 0) {
-            cli_set_process_title($this->getProcessName());
-        } else {
-            if (function_exists('setproctitle')) {
-                setproctitle($this->getProcessName());
-            } else {
-                \Yii::error('Can\'t find cli_set_process_title or setproctitle function');
-            }
-        }
+        cli_set_process_title($this->getProcessName());
     }
 
     /**
@@ -190,19 +208,17 @@ abstract class DaemonController extends Controller
     /**
      * Prevent non index action running
      *
-     * @param \yii\base\Action $action
+     * @param Action $action
      *
      * @return bool
      * @throws NotSupportedException
      */
-    public function beforeAction($action)
+    public function beforeAction($action): bool
     {
         if (parent::beforeAction($action)) {
             $this->initLogger();
-            if ($action->id != "index") {
-                throw new NotSupportedException(
-                    "Only index action allowed in daemons. So, don't create and call another"
-                );
+            if ($action->id !== 'index') {
+                throw new NotSupportedException('Only index action allowed in daemons. So, don\'t create and call another');
             }
 
             return true;
@@ -212,13 +228,13 @@ abstract class DaemonController extends Controller
     }
 
     /**
-     * Возвращает доступные опции
+     * List options
      *
      * @param string $actionID
      *
      * @return array
      */
-    public function options($actionID)
+    public function options($actionID): array
     {
         return [
             'demonize',
@@ -239,11 +255,11 @@ abstract class DaemonController extends Controller
     /**
      * Fetch one task from array of tasks
      *
-     * @param Array
+     * @param array $jobs
      *
      * @return mixed one task
      */
-    protected function defineJobExtractor(&$jobs)
+    protected function defineJobExtractor(array &$jobs)
     {
         return array_shift($jobs);
     }
@@ -251,18 +267,19 @@ abstract class DaemonController extends Controller
     /**
      * Main Loop
      *
-     * * @return boolean 0|1
+     * @return int|null 0|1
+     *
+     * @throws DbException
+     * @throws ExitException
      */
-    final private function loop()
+    final private function loop(): ?int
     {
         if (file_put_contents($this->getPidPath(), getmypid())) {
             $this->parentPID = getmypid();
-            \Yii::trace('Daemon ' . $this->getProcessName() . ' pid ' . getmypid() . ' started.');
+            Yii::debug(sprintf('Daemon %s pid %s started.', $this->getProcessName(), getmypid()));
             while (!self::$stopFlag) {
                 if (memory_get_usage() > $this->memoryLimit) {
-                    \Yii::trace('Daemon ' . $this->getProcessName() . ' pid ' .
-                        getmypid() . ' used ' . memory_get_usage() . ' bytes on ' . $this->memoryLimit .
-                        ' bytes allowed by memory limit');
+                    Yii::debug(sprintf('Daemon %s pid %s used %s bytes on %s bytes allowed by memory limit.', $this->getProcessName(), getmypid(), memory_get_usage(), $this->memoryLimit));
                     break;
                 }
                 $this->trigger(self::EVENT_BEFORE_ITERATION);
@@ -272,16 +289,12 @@ abstract class DaemonController extends Controller
                     while (($job = $this->defineJobExtractor($jobs)) !== null) {
                         //if no free workers, wait
                         if ($this->isMultiInstance && (count(static::$currentJobs) >= $this->maxChildProcesses)) {
-                            \Yii::trace('Reached maximum number of child processes. Waiting...');
+                            Yii::debug('Reached maximum number of child processes. Waiting...');
                             while (count(static::$currentJobs) >= $this->maxChildProcesses) {
                                 sleep(1);
                                 pcntl_signal_dispatch();
                             }
-                            \Yii::trace(
-                                'Free workers found: ' .
-                                ($this->maxChildProcesses - count(static::$currentJobs)) .
-                                ' worker(s). Delegate tasks.'
-                            );
+                            Yii::debug(sprintf('Free workers found: %s worker(s). Delegate tasks.', $this->maxChildProcesses - count(static::$currentJobs)));
                         }
                         pcntl_signal_dispatch();
                         $this->runDaemon($job);
@@ -293,26 +306,31 @@ abstract class DaemonController extends Controller
                 $this->trigger(self::EVENT_AFTER_ITERATION);
             }
 
-            \Yii::info('Daemon ' . $this->getProcessName() . ' pid ' . getmypid() . ' is stopped.');
+            Yii::info(sprintf('Daemon %s pid %s is stopped.', $this->getProcessName(), getmypid()));
 
-            return self::EXIT_CODE_NORMAL;
+            return ExitCode::OK;
         }
-        $this->halt(self::EXIT_CODE_ERROR, 'Can\'t create pid file ' . $this->getPidPath());
+
+        $this->halt(ExitCode::UNSPECIFIED_ERROR, sprintf('Can\'t create pid file %s.', $this->getPidPath()));
+
+        return null;
     }
 
     /**
      * Delete pid file
      */
-    protected function deletePid()
+    protected function deletePid(): void
     {
         $pid = $this->getPidPath();
         if (file_exists($pid)) {
             if (file_get_contents($pid) == getmypid()) {
                 unlink($this->getPidPath());
             }
-        } else {
-            \Yii::error('Can\'t unlink pid file ' . $this->getPidPath());
+
+            return;
         }
+
+        Yii::error(sprintf('Can\'t unlink pid file %s', $this->getPidPath()));
     }
 
     /**
@@ -322,7 +340,7 @@ abstract class DaemonController extends Controller
      * @param array $siginfo
      * @param null $status
      */
-    final static function signalHandler($signo, $siginfo = [], $status = null)
+    final static function signalHandler($signo, $siginfo = [], $status = null): void
     {
         switch ($signo) {
             case SIGINT:
@@ -357,8 +375,10 @@ abstract class DaemonController extends Controller
      * @param string $job
      *
      * @return boolean
+     * @throws DbException
+     * @throws ExitException
      */
-    final public function runDaemon($job)
+    final public function runDaemon($job): bool
     {
         if ($this->isMultiInstance) {
             $this->flushLog();
@@ -377,9 +397,9 @@ abstract class DaemonController extends Controller
                 $status = $this->doJob($job);
                 $this->trigger(self::EVENT_AFTER_JOB);
                 if ($status) {
-                    $this->halt(self::EXIT_CODE_NORMAL);
+                    $this->halt(ExitCode::OK);
                 } else {
-                    $this->halt(self::EXIT_CODE_ERROR, 'Child process #' . $pid . ' return error.');
+                    $this->halt(ExitCode::UNSPECIFIED_ERROR, sprintf('Child process #%s return error.', $pid));
                 }
             }
         } else {
@@ -387,8 +407,10 @@ abstract class DaemonController extends Controller
             $status = $this->doJob($job);
             $this->trigger(self::EVENT_AFTER_JOB);
 
-            return $status;
+            return (bool) $status;
         }
+
+        return null;
     }
 
     /**
@@ -396,49 +418,48 @@ abstract class DaemonController extends Controller
      *
      * @param $code int -1|0|1
      * @param $message string
+     * @throws ExitException
      */
-    protected function halt($code, $message = null)
+    protected function halt($code, $message = null): void
     {
         if ($message !== null) {
-            if ($code == self::EXIT_CODE_ERROR) {
-                \Yii::error($message);
+            if ($code === ExitCode::UNSPECIFIED_ERROR) {
+                Yii::error($message);
                 if (!$this->demonize) {
                     $message = Console::ansiFormat($message, [Console::FG_RED]);
                 }
             } else {
-                \Yii::trace($message);
+                Yii::debug($message);
             }
             if (!$this->demonize) {
                 $this->writeConsole($message);
             }
         }
         if ($code !== -1) {
-            \Yii::$app->end($code);
+            Yii::$app->end($code);
         }
     }
 
     /**
      * Renew connections
-     * @throws \yii\base\InvalidConfigException
-     * @throws \yii\db\Exception
+     * @throws DbException
      */
-    protected function renewConnections()
+    protected function renewConnections(): void
     {
-        if (isset(\Yii::$app->db)) {
-            \Yii::$app->db->close();
-            \Yii::$app->db->open();
+        if (isset(Yii::$app->db)) {
+            Yii::$app->db->close();
+            Yii::$app->db->open();
         }
     }
 
     /**
      * Show message in console
-     *
-     * @param $message
+     * @param string $message
      */
-    private function writeConsole($message)
+    private function writeConsole(string $message): void
     {
-        $out = Console::ansiFormat('[' . date('d.m.Y H:i:s') . '] ', [Console::BOLD]);
-        $this->stdout($out . $message . "\n");
+        $out = Console::ansiFormat(sprintf('[%s] ', date('d.m.Y H:i:s')), [Console::BOLD]);
+        $this->stdout(sprintf('%s%s%s', $out, $message, PHP_EOL));
     }
 
     /**
@@ -446,24 +467,27 @@ abstract class DaemonController extends Controller
      *
      * @return string
      */
-    public function getPidPath($daemon = null)
+    public function getPidPath(?string $daemon = null): string
     {
-        $dir = \Yii::getAlias($this->pidDir);
+        $dir = Yii::getAlias($this->pidDir);
         if (!file_exists($dir)) {
             mkdir($dir, 0744, true);
         }
+
         $daemon = $this->getProcessName($daemon);
 
-        return $dir . DIRECTORY_SEPARATOR . $daemon;
+        return sprintf('%s%s%s', $dir, DIRECTORY_SEPARATOR, $daemon);
     }
 
     /**
+     * @param string|null $route
+     *
      * @return string
      */
-    public function getProcessName($route = null)
+    public function getProcessName(?string $route = null): string
     {
         if (is_null($route)) {
-            $route = \Yii::$app->requestedRoute;
+            $route = Yii::$app->requestedRoute;
         }
 
         return str_replace(['/index', '/'], ['', '.'], $route);
@@ -490,7 +514,7 @@ abstract class DaemonController extends Controller
      *
      * @param string $string
      *
-     * @return int
+     * @return bool|int
      */
     public function stderr($string)
     {
@@ -504,16 +528,17 @@ abstract class DaemonController extends Controller
     /**
      * Empty log queue
      */
-    protected function cleanLog()
+    protected function cleanLog(): void
     {
-        \Yii::$app->log->logger->messages = [];
+        Yii::$app->log->logger->messages = [];
     }
 
     /**
      * Empty log queue
+     * @param bool $final
      */
-    protected function flushLog($final = false)
+    protected function flushLog($final = false): void
     {
-        \Yii::$app->log->logger->flush($final);
+        Yii::$app->log->logger->flush($final);
     }
 }

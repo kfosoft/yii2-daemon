@@ -10,13 +10,13 @@ The preferred way to install this extension is through [composer](http://getcomp
 Either run
 
 ```
-php composer.phar require --prefer-dist vyants/yii2-daemon "*"
+php composer.phar require --prefer-dist kfosoft/yii2-daemon "*"
 ```
 
 or add
 
 ```
-"vyants/yii2-daemon": "*"
+"kfosoft/yii2-daemon": "*"
 ```
 
 to the require section of your `composer.json` file.
@@ -31,7 +31,9 @@ Do the following steps:
 
 namespace console\controllers;
 
-class WatcherDaemonController extends \vyants\daemon\controllers\WatcherDaemonController
+use kfosoft\daemon\WatcherDaemon;
+
+class WatcherDaemonController extends WatcherDaemon
 {
     /**
      * @return array
@@ -63,9 +65,9 @@ Usage
 
 namespace console\controllers;
 
-use \vyants\daemon\DaemonController;
+use kfosoft\daemon\Daemon;
 
-class {NAME}DaemonController extends DaemonController
+class {NAME}DaemonController extends Daemon
 {
     /**
      * @return array
@@ -264,15 +266,4 @@ If you want to change logging preferences, you may override the function initLog
         // Flush each message
         \Yii::$app->getLog()->flushInterval = 1;
     }
-```
-    
-    
-### Installing Proctitle on PHP < 5.5.0
-
-You will need proctitle extension on your server to be able to isntall yii2-daemon. For a debian 7 you can use these commands:
-
-```
-# pecl install channel://pecl.php.net/proctitle-0.1.2
-# echo "extension=proctitle.so" > /etc/php5/mods-available/proctitle.ini
-# php5enmod proctitle
 ```
