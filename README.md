@@ -21,6 +21,10 @@ or add
 
 to the require section of your `composer.json` file.
 
+### Setting SingleJob
+1. Create command class and implement the SingleJobInterface.
+2. Implement logic in `__invoke` method and please return time for sleep from `sleepTime` method.
+
 ### Setting WatcherDaemon
 WatcherDaemon is the main daemon and provides from box. This daemon check another daemons and run, if it need.
 Do the following steps:
@@ -82,7 +86,7 @@ class {NAME}DaemonController extends Daemon
     /**
      * @return jobtype
      */
-    protected function doJob($job)
+    protected function __invoke($job)
     {
         /*
         TODO: implement you logic
@@ -147,7 +151,7 @@ class SomeRabbitQueueController extends BaseDaemonController
      * @throws NotSupportedException
      * @SuppressWarnings(PHPMD.UnusedFormalParameter)
      */
-    protected function doJob($job)
+    public function __invoke($job)
     {
         $result = false;
 

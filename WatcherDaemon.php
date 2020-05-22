@@ -42,13 +42,13 @@ abstract class WatcherDaemon extends Daemon
 
     /**
      * {@inheritdoc}
-     * @param array $job
+     * @param array|string $job
      * @return bool
      * @throws ExitException
      * @throws InvalidRouteException
      * @throws Exception
      */
-    public function __invoke(array $job): bool
+    public function __invoke($job): bool
     {
         $pid_file = $this->getPidPath($job['daemon']);
 

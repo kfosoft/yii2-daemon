@@ -144,11 +144,11 @@ abstract class Daemon extends Controller
     /**
      * Daemon worker body
      *
-     * @param array $job
+     * @param array|string $job
      *
      * @return bool
      */
-    abstract public function __invoke(array $job): bool;
+    abstract public function __invoke($job): bool;
 
     /**
      * Base action, you can't override or create another actions
