@@ -3,6 +3,7 @@
 namespace kfosoft\daemon;
 
 use Yii;
+use yii\base\Exception as BaseException;
 use yii\base\ExitException;
 use yii\base\InvalidRouteException;
 use yii\console\Exception;
@@ -23,13 +24,19 @@ abstract class WatcherDaemon extends Daemon
     /**
      * Prevent double start
      * @throws ExitException
+     * @throws BaseException
      */
     public function init(): void
     {
+        if ($this instanceof SingleJobInterface) {
+            throw new BaseException(sprintf('The class "%s" shouldn\'t implement Single Job Interface. Please inherit the Daemon abstract class or remove Single Job Interface.'));
+        }
+
         $pid_file = $this->getPidPath();
         if (file_exists($pid_file) && ($pid = file_get_contents($pid_file)) && $this->isProcessRunning($pid)) {
             $this->halt(ExitCode::UNSPECIFIED_ERROR, 'Another Watcher is already running.');
         }
+
         parent::init();
     }
 
@@ -41,7 +48,7 @@ abstract class WatcherDaemon extends Daemon
      * @throws InvalidRouteException
      * @throws Exception
      */
-    protected function doJob(array $job): bool
+    public function __invoke(array $job): bool
     {
         $pid_file = $this->getPidPath($job['daemon']);
 

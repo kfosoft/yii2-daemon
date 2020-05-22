@@ -63,7 +63,7 @@ abstract class Daemon extends Controller
     /**
      * @var bool used for soft daemon stop, set 1 to stop
      */
-    private static $stopFlag = false;
+    protected static $stopFlag = false;
 
     /**
      * @var int Delay between task list checking
@@ -148,10 +148,10 @@ abstract class Daemon extends Controller
      *
      * @return bool
      */
-    abstract protected function doJob(array $job): bool;
+    abstract public function __invoke(array $job): bool;
 
     /**
-     * Base action, you can\t override or create another actions
+     * Base action, you can't override or create another actions
      * @return int
      *
      * @throws DbException
@@ -245,14 +245,6 @@ abstract class Daemon extends Controller
     }
 
     /**
-     * Extract current unprocessed jobs
-     * You can extract jobs from DB (DataProvider will be great), queue managers (ZMQ, RabbiMQ etc), redis and so on
-     *
-     * @return array with jobs
-     */
-    abstract protected function defineJobs();
-
-    /**
      * Fetch one task from array of tasks
      *
      * @param array $jobs
@@ -284,7 +276,8 @@ abstract class Daemon extends Controller
                 }
                 $this->trigger(self::EVENT_BEFORE_ITERATION);
                 $this->renewConnections();
-                $jobs = $this->defineJobs();
+
+                $jobs = $this instanceof SingleJobInterface ? ['className' => static::class, 'enabled' => true] : $this->defineJobs();
                 if ($jobs && !empty($jobs)) {
                     while (($job = $this->defineJobExtractor($jobs)) !== null) {
                         //if no free workers, wait
@@ -294,16 +287,23 @@ abstract class Daemon extends Controller
                                 sleep(1);
                                 pcntl_signal_dispatch();
                             }
+
                             Yii::debug(sprintf('Free workers found: %s worker(s). Delegate tasks.', $this->maxChildProcesses - count(static::$currentJobs)));
                         }
+
                         pcntl_signal_dispatch();
                         $this->runDaemon($job);
                     }
                 } else {
                     sleep($this->sleep);
                 }
+
                 pcntl_signal_dispatch();
                 $this->trigger(self::EVENT_AFTER_ITERATION);
+
+                if ($this instanceof SingleJobInterface) {
+                    sleep($this->sleepTime());
+                }
             }
 
             Yii::info(sprintf('Daemon %s pid %s is stopped.', $this->getProcessName(), getmypid()));
@@ -394,7 +394,7 @@ abstract class Daemon extends Controller
                 $this->renewConnections();
                 //child process must die
                 $this->trigger(self::EVENT_BEFORE_JOB);
-                $status = $this->doJob($job);
+                $status = $this($job);
                 $this->trigger(self::EVENT_AFTER_JOB);
                 if ($status) {
                     $this->halt(ExitCode::OK);
@@ -404,7 +404,7 @@ abstract class Daemon extends Controller
             }
         } else {
             $this->trigger(self::EVENT_BEFORE_JOB);
-            $status = $this->doJob($job);
+            $status = $this($job);
             $this->trigger(self::EVENT_AFTER_JOB);
 
             return (bool) $status;
@@ -535,10 +535,9 @@ abstract class Daemon extends Controller
 
     /**
      * Empty log queue
-     * @param bool $final
      */
-    protected function flushLog($final = false): void
+    protected function flushLog(): void
     {
-        Yii::$app->log->logger->flush($final);
+        Yii::$app->log->logger->flush(true);
     }
 }
