@@ -14,7 +14,7 @@ use yii\log\FileTarget;
 
 /**
  * @package kfosoft\daemon
- * @version 20.05
+ * @version 20.06
  * @author (c) KFOSOFT <kfosoftware@gmail.com>
  */
 abstract class Daemon extends Controller
@@ -26,7 +26,7 @@ abstract class Daemon extends Controller
     protected const EVENT_AFTER_ITERATION = 'event_after_iteration';
 
     /**
-     * @var bool Run controller as Daemon
+     * @var bool run daemon in background
      * @default false
      */
     public $demonize = false;
@@ -151,11 +151,14 @@ abstract class Daemon extends Controller
     abstract public function __invoke($job): bool;
 
     /**
-     * Base action, you can't override or create another actions
+     * Runs daemon. If you want to run daemon in background, use --demonize=1 option.
+     *
      * @return int
      *
      * @throws DbException
      * @throws ExitException
+     *
+     * @todo Base action, you can't override or create another actions
      */
     final public function actionIndex(): ?int
     {
