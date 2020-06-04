@@ -2,8 +2,8 @@
     "name": "kfosoft/yii2-daemon",
     "description": "Extension provides functionality for simple daemons creation and control",
     "type": "yii2-extension",
-    "keywords": ["yii2","extension", "daemon"],
-    "license": "BSD-3-Clause",
+    "keywords": ["yii2", "extension", "daemon"],
+    "license": "MIT",
     "authors": [
         {
             "name": "Vladimir Yants",
