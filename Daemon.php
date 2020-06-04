@@ -325,7 +325,7 @@ abstract class Daemon extends Controller
     protected function deletePid(): void
     {
         $pid = $this->getPidPath();
-        if (file_exists($pid)) {
+        if (file_exists($pid) && !is_dir($pid)) {
             if (file_get_contents($pid) == getmypid()) {
                 unlink($this->getPidPath());
             }
