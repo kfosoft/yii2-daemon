@@ -2,6 +2,7 @@
 
 namespace kfosoft\daemon;
 
+use RuntimeException;
 use Yii;
 use yii\base\Action;
 use yii\base\ExitException;
@@ -280,9 +281,17 @@ abstract class Daemon extends Controller
                 $this->trigger(self::EVENT_BEFORE_ITERATION);
                 $this->renewConnections();
 
-                $jobs = $this instanceof SingleJobInterface ? ['className' => static::class, 'enabled' => true] : $this->defineJobs();
+                $jobs = $this instanceof SingleJobInterface ? [['className' => static::class, 'enabled' => true]] : $this->defineJobs();
                 if ($jobs && !empty($jobs)) {
                     while (($job = $this->defineJobExtractor($jobs)) !== null) {
+                        if (!isset($job['enabled'], $job['className'])) {
+                            throw new RuntimeException('Bad format of job definition. Good format example: [\'className\' => \'some\\namespace\\SomeClass\', \'enabled\' => true]');
+                        }
+
+                        if ($job['enabled'] !== true) {
+                            continue;
+                        }
+
                         //if no free workers, wait
                         if ($this->isMultiInstance && (count(static::$currentJobs) >= $this->maxChildProcesses)) {
                             Yii::debug('Reached maximum number of child processes. Waiting...');
@@ -295,7 +304,7 @@ abstract class Daemon extends Controller
                         }
 
                         pcntl_signal_dispatch();
-                        $this->runDaemon($job);
+                        $this->runDaemon($job['className']);
                     }
                 } else {
                     sleep($this->sleep);
@@ -409,11 +418,9 @@ abstract class Daemon extends Controller
             $this->trigger(self::EVENT_BEFORE_JOB);
             $status = $this($job);
             $this->trigger(self::EVENT_AFTER_JOB);
-
-            return (bool) $status;
         }
 
-        return null;
+        return (bool) $status;
     }
 
     /**
